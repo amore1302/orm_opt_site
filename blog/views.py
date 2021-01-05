@@ -1,7 +1,7 @@
 from django.shortcuts import render
 from blog.models import Comment, Post, Tag
 from django.db.models import Count
-
+from django.db.models.query import Prefetch
 
 def get_related_posts_count(tag):
     return tag.posts.count()
@@ -30,7 +30,7 @@ def serialize_post(post):
 
 
 
-def serialize_post_optimized(post, coments_count):
+def serialize_post_optimized(post, coments_count, tags_post):
 
     return {
         "title": post.title,
@@ -40,8 +40,8 @@ def serialize_post_optimized(post, coments_count):
         "image_url": post.image.url if post.image else None,
         "published_at": post.published_at,
         "slug": post.slug,
-        "tags": [serialize_tag_optimized(tag) for tag in post.tags.annotate(posts_count=Count('posts'))],
-        'first_tag_title': post.tags.all()[0].title,
+        "tags": [serialize_tag_optimized(tag) for tag in tags_post],
+        'first_tag_title': tags_post[0].title,
     }
 
 
@@ -54,16 +54,17 @@ def serialize_tag(tag):
 
 
 def index(request):
-    most_popular_posts = Post.objects.popular().prefetch_related('author')[:5].prefetch_related('tags').fetch_with_comments_count()
+    most_popular_posts = Post.objects.popular().prefetch_related('author')[:5].prefetch_related(
+        Prefetch('tags', Tag.objects.annotate(posts_count=Count('posts')), 'tags_post')).fetch_with_comments_count()
 
-    fresh_posts = Post.objects.prefetch_related('author').prefetch_related('tags').order_by('-published_at').annotate(comments_count=Count('comments'))[:5]
+    fresh_posts = Post.objects.prefetch_related('author').prefetch_related(
+        Prefetch('tags', Tag.objects.annotate(posts_count=Count('posts')), 'tags_post')).order_by('-published_at').annotate(comments_count=Count('comments'))[:5]
     most_fresh_posts = list(fresh_posts)
 
     most_popular_tags = Tag.objects.popular()[:5].annotate(posts_count=Count('posts'))
-
     context = {
-        'most_popular_posts': [serialize_post_optimized(post, post.comments_count) for post in most_popular_posts],
-        'page_posts': [serialize_post_optimized(post, post.comments_count) for post in most_fresh_posts],
+        'most_popular_posts': [serialize_post_optimized(post, post.comments_count, post.tags_post) for post in most_popular_posts],
+        'page_posts': [serialize_post_optimized(post, post.comments_count, post.tags_post) for post in most_fresh_posts],
         'popular_tags': [serialize_tag_optimized(tag) for tag in most_popular_tags],
     }
 
